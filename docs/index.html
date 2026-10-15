@@ -422,15 +422,15 @@ function startConsole(LIVE) {
 
   // coastlines: loaded at runtime from the CDN, map degrades to graticule + epicentres without them
   function loadLand() {
-    const urls = ['https://cdn.jsdelivr.net/npm/@amcharts/amcharts4-geodata@4.1.28/worldLow.js', 'https://cdn.jsdelivr.net/npm/@amcharts/amcharts4-geodata@4.1.20/worldLow.js'];
-    const tryNext = i => {
-      if (i >= urls.length) { $('geoNote').hidden = false; return; }
-      const s = document.createElement('script'); s.src = urls[i]; s.async = true;
-      s.onload = () => { if (window.am4geodata_worldLow) { LAND = { type: 'FeatureCollection', features: window.am4geodata_worldLow.features }; } else tryNext(i + 1); };
-      s.onerror = () => tryNext(i + 1);
-      document.head.appendChild(s);
+    const fail = () => { $('geoNote').hidden = false; };
+    const lands = ['https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/land-110m.json', 'https://unpkg.com/world-atlas@2.0.2/land-110m.json'];
+    const s = document.createElement('script'); s.src = 'https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js'; s.async = true;
+    s.onerror = fail;
+    s.onload = async () => {
+      for (const u of lands) { try { const r = await fetch(u); if (!r.ok) continue; const t = await r.json(); LAND = topojson.feature(t, t.objects.land); return; } catch (e) {} }
+      fail();
     };
-    tryNext(0);
+    document.head.appendChild(s);
   }
 
   // ---------- replay ----------
@@ -698,7 +698,7 @@ function startConsole(LIVE) {
 </script>
 <script>
 // Live loader: pulls the USGS M2.5+ past-7-days feed in the visitor's browser,
-// converts it to the console's compact format, and falls back to the bundled snapshot.
+// converts it to the console's compact format, and shows a retry prompt if the feed is unreachable.
 (() => {
   const FEED = 'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_week.geojson';
   const clean = s => String(s || 'Unknown location').replace(/[~;\n]/g, ' ');
