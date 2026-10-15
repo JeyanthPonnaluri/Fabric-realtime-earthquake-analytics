@@ -1,0 +1,17 @@
+// Tile 1 - Last 24 hours at a glance
+QuakesLatest | where EventTime > ago(24h) and EventType == "earthquake" | summarize Earthquakes = count(), M4_5plus = countif(Magnitude >= 4.5), StrongestM = max(Magnitude), FeltReports = sum(Felt), DeepEvents = countif(DepthKm >= 300)
+
+// Tile 2 - Where the ground moved (7 days, M2.5+)
+QuakesLatest | where EventTime > ago(7d) and Magnitude >= 2.5 | project Longitude, Latitude, Magnitude, Place | render scatterchart with (kind = map)
+
+// Tile 3 - Events per 6 hours by magnitude band
+QuakesHourly | where Hour > ago(7d) and EventType == "earthquake" | summarize Events = sum(Events) by Hour = bin(Hour, 6h), MagBand | render columnchart with (kind = stacked)
+
+// Tile 4 - Latest significant events
+QuakesLatest | where Magnitude >= 4 | top 20 by EventTime desc | project EventTime, Magnitude, Place, DepthKm, Status, Url
+
+// Tile 5 - Most active regions (7 days)
+QuakesLatest | where EventTime > ago(7d) and EventType == "earthquake" | summarize Events = count() by Region | top 10 by Events | render barchart
+
+// Tile 6 - Pipeline freshness
+Quakes | summarize LastIngest = max(IngestedAt), NewestEvent = max(EventTime), RowsLastHour = countif(IngestedAt > ago(1h)) | extend MinutesSinceIngest = datetime_diff('minute', now(), LastIngest)

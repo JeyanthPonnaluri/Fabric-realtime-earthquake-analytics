@@ -1,0 +1,740 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Live global earthquake console: USGS feed, D3.js globe, replay and seismology charts. Public demo of a Microsoft Fabric Real-Time Intelligence project.">
+<meta property="og:title" content="Global Quake Watch: live earthquake analytics">
+<meta property="og:description" content="Live USGS earthquake feed on a D3.js globe. Companion demo of a Microsoft Fabric Real-Time Intelligence pipeline.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 28'%3E%3Cpath d='M0 14h8l3-8 4 18 4-24 4 22 3-12 3 4h11' fill='none' stroke='%23E07B3C' stroke-width='3' stroke-linejoin='round'/%3E%3C/svg%3E">
+<title>Global Quake Watch</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500&family=Instrument+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: seismic operations console. Control rail, hero globe with replay + spotlight column, live row, research row.
+   Deliberately single-theme (dark basalt) so the map and magma marks read like a control-room wall. */
+:root {
+  color-scheme: dark;
+  --bg: #0C0E11; --panel: #13161B; --panel-2: #191D23; --line: #262B33; --line-2: #313742;
+  --ink: #ECE8E0; --ink-2: #ABB1BA; --muted: #727A86;
+  --accent: #FF8A3D; --accent-ink: #1C1006;
+  --ocean: #0E1318; --land: #1F262E; --coast: #3A434E; --grat: #161D25;
+  --d1: #9BE7DC; --d2: #45B2A6; --d3: #2B7C87;          /* depth: shallow → deep (one hue) */
+  --m1: #8C4A2F; --m2: #C9612F; --m3: #FF8A3D; --m4: #FFD39A; /* magnitude band: low → high (one hue) */
+  --warn: #E9B949;
+  --f-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --f-body: "Instrument Sans", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 14px; line-height: 1.45; }
+.shell { max-width: 1440px; margin: 0 auto; padding-inline: 20px; padding-block: 18px 40px; display: grid; gap: 14px; }
+@media (max-width: 560px) { .shell { padding-inline: 16px; } }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mono { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+
+/* top rail */
+.rail { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; }
+.brand { display: flex; align-items: center; gap: 12px; margin-right: auto; min-width: 0; }
+.brand svg { flex: none; }
+.brand h1 { font-family: var(--f-display); font-weight: 800; font-size: clamp(22px, 3vw, 30px); letter-spacing: -.01em; margin: 0; line-height: 1; }
+.brand .sub { font-family: var(--f-mono); font-size: 11px; color: var(--muted); letter-spacing: .06em; text-transform: uppercase; margin-top: 4px; }
+.status { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--line-2); border-radius: 999px; font-family: var(--f-mono); font-size: 11.5px; color: var(--ink-2); white-space: nowrap; }
+.status i { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); box-shadow: 0 0 0 3px rgba(233,185,73,.15); }
+.status:not(.offline) i { background: #4CC38A; box-shadow: 0 0 0 3px rgba(76,195,138,.18); animation: livepulse 2s ease-in-out infinite; }
+@keyframes livepulse { 50% { box-shadow: 0 0 0 6px rgba(76,195,138,0); } }
+@media (prefers-reduced-motion: reduce) { .status i { animation: none !important; } }
+.controls { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; width: 100%; padding: 10px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+.ctl { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.seg { display: inline-flex; background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 2px; gap: 2px; }
+.seg button { border: 0; background: transparent; padding: 5px 10px; border-radius: 5px; font-family: var(--f-mono); font-size: 12px; color: var(--ink-2); cursor: pointer; }
+.seg button:hover { color: var(--ink); }
+.seg button[aria-pressed="true"] { background: var(--panel-2); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line-2); }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px 4px 10px; border-radius: 999px; background: rgba(255,138,61,.12); border: 1px solid rgba(255,138,61,.4); color: var(--ink); font-size: 12px; }
+.chip button { border: 0; background: transparent; cursor: pointer; color: var(--ink-2); padding: 0 4px; font-size: 14px; line-height: 1; }
+.count { margin-left: auto; font-family: var(--f-mono); font-size: 12px; color: var(--muted); }
+
+/* panels */
+.grid { display: grid; gap: 14px; grid-template-columns: repeat(12, minmax(0, 1fr)); }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; min-width: 0; display: grid; gap: 10px; align-content: start; }
+.ph { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.ph h2 { font-family: var(--f-display); font-weight: 700; font-size: 17px; margin: 0; letter-spacing: -.005em; }
+.ph .tag { font-family: var(--f-mono); font-size: 10.5px; color: var(--muted); letter-spacing: .04em; }
+.note { margin: 0; font-size: 12px; color: var(--muted); max-width: 70ch; }
+.c8 { grid-column: span 8; } .c4 { grid-column: span 4; } .c5 { grid-column: span 5; } .c3 { grid-column: span 3; } .c6 { grid-column: span 6; } .c12 { grid-column: span 12; }
+@media (max-width: 1100px) { .c8, .c4, .c5, .c3, .c6 { grid-column: span 12; } }
+
+/* hero map */
+.mapcard { padding: 0; overflow: hidden; position: relative; gap: 0; }
+.mapwrap { position: relative; width: 100%; aspect-ratio: 16 / 9; max-width: 100%; background: radial-gradient(ellipse at 50% 45%, #121820 0%, var(--bg) 70%); }
+@media (max-width: 700px) { .mapwrap { aspect-ratio: 1 / 1; } }
+#map { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+#map.dragging { cursor: grabbing; }
+.overlay-tl { position: absolute; left: 14px; top: 12px; display: grid; gap: 4px; pointer-events: none; }
+.overlay-tl .k { font-family: var(--f-mono); font-size: 10.5px; color: var(--muted); letter-spacing: .08em; text-transform: uppercase; }
+.overlay-tl .v { font-family: var(--f-display); font-weight: 700; font-size: 20px; }
+.overlay-tr { position: absolute; right: 12px; top: 12px; display: flex; gap: 8px; }
+.legend { position: absolute; left: 14px; bottom: 12px; display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 11.5px; color: var(--ink-2); background: rgba(12,14,17,.72); padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line); max-width: calc(100% - 28px); }
+.sw { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+.geo-note { position: absolute; right: 14px; bottom: 12px; font-size: 11px; color: var(--muted); }
+.tip { position: absolute; pointer-events: none; z-index: 5; background: #0A0C0F; border: 1px solid var(--line-2); color: var(--ink); font-size: 12px; padding: 8px 10px; border-radius: 8px; max-width: 260px; box-shadow: 0 8px 24px rgba(0,0,0,.5); transform: translate(12px, -50%); }
+.tip b { font-family: var(--f-mono); }
+.tip .s { color: var(--ink-2); }
+
+/* replay */
+.replay { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 10px 14px; border-top: 1px solid var(--line); background: var(--panel); }
+.play { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line-2); background: var(--panel-2); cursor: pointer; display: grid; place-items: center; }
+.play:hover { border-color: var(--accent); }
+.play svg { fill: var(--ink); }
+.scrub { position: relative; height: 34px; min-width: 0; }
+.scrub svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.scrub input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.clock { font-family: var(--f-mono); font-size: 12px; color: var(--ink-2); min-width: 128px; text-align: right; }
+
+/* spotlight */
+.spot { position: relative; overflow: hidden; }
+.spot .eyebrow { font-family: var(--f-mono); font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+.spot .mag { font-family: var(--f-display); font-weight: 800; font-size: 64px; line-height: .9; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.spot .mag small { font-size: 22px; font-weight: 700; color: var(--ink-2); margin-right: 2px; }
+.spot .place { font-size: 16px; font-weight: 600; text-wrap: balance; }
+.facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; margin: 4px 0 0; }
+.facts div { min-width: 0; }
+.facts dt { font-size: 11px; color: var(--muted); }
+.facts dd { margin: 0; font-family: var(--f-mono); font-size: 13px; color: var(--ink); }
+.btn { justify-self: start; border: 1px solid var(--line-2); background: var(--panel-2); color: var(--ink); padding: 7px 12px; border-radius: 8px; cursor: pointer; font-size: 12.5px; }
+.btn:hover { border-color: var(--accent); }
+.seis { width: 100%; height: 46px; display: block; }
+
+/* KPIs */
+.kpis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.kpi { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: grid; gap: 2px; min-width: 0; }
+.kpi .l { font-size: 11px; color: var(--muted); }
+.kpi .v { font-family: var(--f-display); font-weight: 700; font-size: 26px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.kpi .s { font-size: 11.5px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kpi svg { width: 100%; height: 22px; display: block; margin-top: 4px; }
+
+/* feed */
+.feed { list-style: none; margin: 0; padding: 0; display: grid; max-height: 360px; overflow-y: auto; }
+.feed li button { width: 100%; display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; gap: 10px; align-items: center; text-align: left; padding: 8px 4px; border: 0; border-bottom: 1px solid var(--line); background: transparent; cursor: pointer; }
+.feed li button:hover, .feed li button[aria-current="true"] { background: var(--panel-2); }
+.mchip { font-family: var(--f-mono); font-weight: 500; font-size: 13px; text-align: center; border-radius: 6px; padding: 3px 0; }
+.feed .pl { font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.feed .meta { font-family: var(--f-mono); font-size: 11px; color: var(--muted); text-align: right; white-space: nowrap; }
+.empty { color: var(--muted); font-size: 13px; padding: 12px 4px; }
+
+/* charts */
+svg.chart { width: 100%; height: auto; display: block; overflow: visible; }
+svg text { fill: var(--muted); font-family: var(--f-mono); font-size: 10.5px; }
+svg .ink { fill: var(--ink); }
+svg .ink2 { fill: var(--ink-2); }
+svg .grid-l { stroke: var(--grat); stroke-width: 1; }
+svg .axis-l { stroke: var(--line-2); stroke-width: 1; }
+.hit { fill: transparent; cursor: pointer; }
+.legend-row { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 11.5px; color: var(--ink-2); }
+.bigstat { display: flex; flex-wrap: wrap; gap: 4px 22px; }
+.bigstat div { display: grid; }
+.bigstat b { font-family: var(--f-display); font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.bigstat span { font-size: 11.5px; color: var(--muted); }
+
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; font-weight: 500; font-size: 11px; color: var(--muted); padding: 0 10px 8px 0; border-bottom: 1px solid var(--line-2); white-space: nowrap; }
+td { padding: 9px 10px 9px 0; border-bottom: 1px solid var(--line); vertical-align: middle; }
+td.n, th.n { text-align: right; font-family: var(--f-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: var(--panel-2); }
+.tscroll { overflow-x: auto; }
+.pill { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line-2); white-space: nowrap; color: var(--ink-2); }
+.pill.warn { border-color: rgba(233,185,73,.55); color: var(--warn); }
+.pill.warn::before { content: "▲"; font-size: 8px; }
+footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; }
+footer a { color: var(--ink-2); }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; scroll-behavior: auto !important; } }
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="rail">
+    <div class="brand">
+      <svg width="40" height="28" viewBox="0 0 40 28" aria-hidden="true"><path d="M0 14h8l3-8 4 18 4-24 4 22 3-12 3 4h11" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg>
+      <div><h1>Global Quake Watch</h1><div class="sub">Live USGS feed · M2.5+ · Microsoft Fabric RTI project</div></div>
+    </div>
+    <span class="status"><i></i><span id="liveLbl">Connecting…</span> · <span id="snapTime"></span></span>
+  </div>
+
+  <div class="controls" role="group" aria-label="Filters">
+    <div class="ctl">Window
+      <div class="seg" id="win"><button type="button" data-v="1440">24 h</button><button type="button" data-v="4320">3 d</button><button type="button" data-v="10080">7 d</button></div>
+    </div>
+    <div class="ctl">Minimum magnitude
+      <div class="seg" id="mag"><button type="button" data-v="2.5">2.5+</button><button type="button" data-v="4">4+</button><button type="button" data-v="4.5">4.5+</button><button type="button" data-v="5">5+</button></div>
+    </div>
+    <div class="ctl">Map
+      <div class="seg" id="view"><button type="button" data-v="globe">Globe</button><button type="button" data-v="flat">Flat</button></div>
+    </div>
+    <span id="regionChip" hidden></span>
+    <span class="count" id="count"></span>
+  </div>
+
+  <div class="grid">
+    <section class="panel mapcard c8" aria-label="Map of earthquakes">
+      <div class="mapwrap" id="mapwrap">
+        <canvas id="map" role="img" aria-label="Earthquake epicentres on a world map, sized by magnitude and coloured by depth"></canvas>
+        <div class="overlay-tl"><span class="k" id="ovK">Showing</span><span class="v" id="ovV"></span></div>
+        <div class="overlay-tr"><div class="seg"><button type="button" id="spinBtn" aria-pressed="true">Auto-rotate</button></div></div>
+        <div class="legend">
+          <span><span class="sw" style="background:var(--d1)"></span>Shallow &lt;70 km</span>
+          <span><span class="sw" style="background:var(--d2)"></span>70–300 km</span>
+          <span><span class="sw" style="background:var(--d3)"></span>Deep ≥300 km</span>
+          <span>Size = magnitude · rings = last 24 h</span>
+        </div>
+        <span class="geo-note" id="geoNote" hidden>Coastlines unavailable · epicentres trace the plate boundaries</span>
+        <div class="tip" id="tip" hidden></div>
+      </div>
+      <div class="replay">
+        <button class="play" id="playBtn" type="button" aria-label="Replay the window"><svg width="12" height="14" viewBox="0 0 12 14" id="playIcon"><path d="M0 0l12 7-12 7z"/></svg></button>
+        <div class="scrub"><svg id="scrubSvg" preserveAspectRatio="none"></svg><input type="range" id="scrub" min="0" max="1000" value="1000" aria-label="Replay position"></div>
+        <span class="clock" id="clock"></span>
+      </div>
+    </section>
+
+    <aside class="c4" style="display:grid;gap:14px;align-content:start;min-width:0">
+      <section class="panel spot" aria-live="polite">
+        <span class="eyebrow" id="spotEyebrow">Strongest in view</span>
+        <div class="mag" id="spotMag"></div>
+        <div class="place" id="spotPlace"></div>
+        <svg class="seis" id="seis" viewBox="0 0 300 46" preserveAspectRatio="none" aria-hidden="true"></svg>
+        <dl class="facts" id="spotFacts"></dl>
+        <button class="btn" type="button" id="flyBtn">Locate on map</button>
+      </section>
+      <section class="kpis" id="kpis" aria-label="Key figures"></section>
+    </aside>
+  </div>
+
+  <div class="grid">
+    <section class="panel c4">
+      <div class="ph"><h2>Latest events</h2><span class="tag">newest first</span></div>
+      <ul class="feed" id="feed"></ul>
+    </section>
+    <section class="panel c5">
+      <div class="ph"><h2>Activity over time</h2><span class="tag" id="tlTag"></span></div>
+      <svg class="chart" id="timeline" viewBox="0 0 520 250" role="img" aria-label="Stacked bars of earthquakes per time bin by magnitude band"></svg>
+      <div class="legend-row">
+        <span><span class="sw" style="background:var(--m1);border-radius:2px"></span>M2.5–4</span>
+        <span><span class="sw" style="background:var(--m2);border-radius:2px"></span>M4–5</span>
+        <span><span class="sw" style="background:var(--m3);border-radius:2px"></span>M5–6</span>
+        <span><span class="sw" style="background:var(--m4);border-radius:2px"></span>M6+</span>
+      </div>
+    </section>
+    <section class="panel c3">
+      <div class="ph"><h2>Most active regions</h2><span class="tag">click to filter</span></div>
+      <svg class="chart" id="regions" viewBox="0 0 300 260" role="img" aria-label="Most active regions"></svg>
+    </section>
+  </div>
+
+  <div class="grid">
+    <section class="panel c6">
+      <div class="ph"><h2>Gutenberg–Richter distribution</h2><span class="tag">b-value · Aki MLE</span></div>
+      <div class="bigstat" id="grStats"></div>
+      <svg class="chart" id="gr" viewBox="0 0 560 280" role="img" aria-label="Cumulative frequency-magnitude plot"></svg>
+      <p class="note">Count of events at or above each magnitude, log scale. The fitted line uses events at or above the completeness magnitude Mc = 4.5; below it the global catalog is incomplete away from dense networks. A b-value near 1.0 is typical.</p>
+    </section>
+    <section class="panel c6">
+      <div class="ph"><h2>Depth cross-section</h2><span class="tag">depth vs magnitude</span></div>
+      <svg class="chart" id="depth" viewBox="0 0 560 320" role="img" aria-label="Scatter of depth against magnitude"></svg>
+      <p class="note">Depth increases downward. Deep events (≥300 km) occur inside subducting slabs, mainly under Fiji–Tonga, the Philippines and South America. The row at 10 km is partly the default depth assigned when depth is poorly constrained.</p>
+    </section>
+    <section class="panel c12">
+      <div class="ph"><h2>Active sequences</h2><span class="tag">events within 150 km of each M5+ event · click a row to locate it</span></div>
+      <div class="tscroll"><table><thead><tr><th>Sequence near</th><th class="n">Largest</th><th class="n">Events</th><th class="n">Span</th><th class="n">Median depth</th><th>Båth gap (M₁ − M₂)</th></tr></thead><tbody id="seq"></tbody></table></div>
+      <p class="note">Båth’s law predicts the largest aftershock about 1.2 magnitude units below the mainshock. A gap under 0.5 suggests a swarm or doublet rather than a mainshock–aftershock sequence.</p>
+    </section>
+  </div>
+
+  <footer>
+    <span>Data: U.S. Geological Survey Earthquake Hazards Program, M2.5+ past-7-days feed, loaded <span id="snapTime2"></span>. Public domain. Times shown in IST.</span>
+    <span>Public demo of a Microsoft Fabric Real-Time Intelligence project (Eventhouse + KQL + Real-Time Dashboard). <a href="https://github.com/" id="repoLink" target="_blank" rel="noopener">Source &amp; architecture</a> · <a href="https://earthquake.usgs.gov/earthquakes/map/" target="_blank" rel="noopener">USGS live map</a></span>
+  </footer>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<script id="data" type="text/plain"></script>
+<script>
+function startConsole(LIVE) {
+  const $ = id => document.getElementById(id);
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // ---------- data ----------
+  const raw = $('data').textContent.trim().split('\n');
+  const SNAP = Date.parse(raw[0]);
+  const fixRegion = place => {
+    let r = place.includes(', ') ? place.split(', ').pop() : place;
+    r = r.replace(/^(south|southeast|north|west|east) of the /i, '').replace(/^(off the coast of|west of|south of|north of) /i, '').replace(/ region$/, '').replace(/^the /, '');
+    return ({ CA: 'California', 'B.C., MX': 'Mexico', MX: 'Mexico', 'Fiji Islands': 'Fiji', 'Burma (Myanmar)': 'Myanmar', 'Japan region': 'Japan' })[r] || r;
+  };
+  const Q = raw[1].split(';').map((s, i) => {
+    const [ago, mag, lat, lon, depth, felt, place] = s.split('~');
+    return { id: i, ago: +ago, t: SNAP - ago * 60000, mag: +mag, lat: +lat, lon: +lon, depth: +depth, felt: +felt, place, region: fixRegion(place) };
+  });
+  const MAXWIN = 10080;
+
+  // ---------- helpers ----------
+  const fmtIST = (ms, withDay = true) => new Date(ms).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', ...(withDay ? { day: 'numeric', month: 'short' } : {}), hour: '2-digit', minute: '2-digit', hour12: false }) + ' IST';
+  const agoTxt = m => m < 60 ? `${Math.max(1, Math.round(m))} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${(m / 1440).toFixed(1)} d ago`;
+  const depthVar = d => d < 70 ? '--d1' : d < 300 ? '--d2' : '--d3';
+  const magVar = m => m >= 6 ? '--m4' : m >= 5 ? '--m3' : m >= 4 ? '--m2' : '--m1';
+  const magInk = m => m >= 5 ? 'var(--accent-ink)' : 'var(--ink)';
+  const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const energyJ = m => Math.pow(10, 1.5 * m + 4.8);
+  const tnt = j => { const t = j / 4.184e9; return t >= 1e6 ? (t / 1e6).toFixed(1) + ' Mt' : t >= 1e3 ? (t / 1e3).toFixed(t >= 1e4 ? 0 : 1) + ' kt' : Math.round(t) + ' t'; };
+  const hav = (a, b) => { const R = 6371, r = Math.PI / 180, dLa = (b.lat - a.lat) * r, dLo = (b.lon - a.lon) * r; const h = Math.sin(dLa / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dLo / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(h)); };
+  const median = a => { const s = [...a].sort((x, y) => x - y), n = s.length; return n ? (n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2) : 0; };
+  const NS = 'http://www.w3.org/2000/svg';
+  const el = (tag, attrs, parent, text) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text != null) e.textContent = text; parent && parent.appendChild(e); return e; };
+
+  $('snapTime').textContent = fmtIST(SNAP);
+  $('snapTime2').textContent = fmtIST(SNAP);
+
+  // ---------- state ----------
+  const state = { win: 10080, minMag: 2.5, view: 'globe', region: null, selected: null, playT: null, playing: false, spin: !reduceMotion };
+  try { const s = JSON.parse(localStorage.getItem('gqw2') || '{}'); ['win', 'minMag', 'view'].forEach(k => { if (s[k] != null) state[k] = s[k]; }); } catch (e) {}
+  const save = () => { try { localStorage.setItem('gqw2', JSON.stringify({ win: state.win, minMag: state.minMag, view: state.view })); } catch (e) {} };
+
+  let inWin = [], sel = [];
+  const T = () => state.playT ?? SNAP;
+  function derive() {
+    const start = SNAP - state.win * 60000, now = T();
+    inWin = Q.filter(q => q.t >= start && q.t <= now && (!state.region || q.region === state.region));
+    sel = inWin.filter(q => q.mag >= state.minMag - 1e-9);
+  }
+
+  // ---------- map ----------
+  const canvas = $('map'), ctx = canvas.getContext('2d'), tip = $('tip');
+  let W = 0, H = 0, DPR = 1, proj, path, LAND = null, rot = [-150, -8], pts = [];
+  const sphere = { type: 'Sphere' };
+  const graticule = d3.geoGraticule10();
+  function makeProj() {
+    if (state.view === 'globe') proj = d3.geoOrthographic().clipAngle(90).rotate(rot);
+    else proj = d3.geoNaturalEarth1().rotate([-160, 0]);
+    const pad = state.view === 'globe' ? 18 : 10;
+    proj.fitExtent([[pad, pad], [W - pad, H - pad]], sphere);
+    if (state.view === 'globe') proj.rotate(rot);
+    path = d3.geoPath(proj, ctx);
+  }
+  function resize() {
+    const r = canvas.getBoundingClientRect(); DPR = window.devicePixelRatio || 1;
+    W = r.width; H = r.height; canvas.width = W * DPR; canvas.height = H * DPR; ctx.setTransform(DPR, 0, 0, DPR, 0, 0); makeProj();
+  }
+  const visible = q => state.view !== 'globe' || d3.geoDistance([q.lon, q.lat], [-rot[0], -rot[1]]) < Math.PI / 2 - 0.02;
+  const radius = m => Math.max(1.8, Math.pow(1.62, m - 2.5) * 1.7 * Math.max(.75, W / 900));
+
+  function draw(ts) {
+    if (!W) return;
+    ctx.clearRect(0, 0, W, H);
+    // ocean + glow
+    ctx.beginPath(); path(sphere); ctx.fillStyle = css('--ocean'); ctx.fill();
+    if (state.view === 'globe') { ctx.lineWidth = 1; ctx.strokeStyle = css('--line-2'); ctx.stroke(); }
+    ctx.beginPath(); path(graticule); ctx.strokeStyle = css('--grat'); ctx.lineWidth = 1; ctx.stroke();
+    if (LAND) { ctx.beginPath(); path(LAND); ctx.fillStyle = css('--land'); ctx.fill(); ctx.strokeStyle = css('--coast'); ctx.lineWidth = .6; ctx.stroke(); }
+    const now = T(), phaseBase = (ts || 0) / 1800;
+    const sorted = [...sel].sort((a, b) => a.mag - b.mag);
+    pts = [];
+    const ocean = css('--ocean');
+    for (const q of sorted) {
+      if (!visible(q)) continue;
+      const p = proj([q.lon, q.lat]); if (!p) continue;
+      const r = radius(q.mag), col = css(depthVar(q.depth));
+      const age = (now - q.t) / 3600000;
+      if (age < 24) { // ripple for recent events
+        const ph = reduceMotion ? .5 : ((phaseBase + q.id * .137) % 1);
+        ctx.beginPath(); ctx.arc(p[0], p[1], r + ph * (r * 2.2 + 14), 0, Math.PI * 2);
+        ctx.strokeStyle = col; ctx.globalAlpha = (1 - ph) * .7 * (1 - age / 24) + .05; ctx.lineWidth = 1.4; ctx.stroke(); ctx.globalAlpha = 1;
+      }
+      ctx.beginPath(); ctx.arc(p[0], p[1], r, 0, Math.PI * 2);
+      ctx.fillStyle = col; ctx.globalAlpha = .88; ctx.fill(); ctx.globalAlpha = 1;
+      ctx.lineWidth = 1.2; ctx.strokeStyle = ocean; ctx.stroke();
+      pts.push({ x: p[0], y: p[1], r, q });
+    }
+    const s = state.selected != null ? Q[state.selected] : null;
+    if (s && visible(s) && sel.includes(s)) {
+      const p = proj([s.lon, s.lat]), r = radius(s.mag);
+      ctx.beginPath(); ctx.arc(p[0], p[1], r + 5, 0, Math.PI * 2); ctx.strokeStyle = css('--ink'); ctx.lineWidth = 1.6; ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(p[0] - r - 12, p[1]); ctx.lineTo(p[0] - r - 6, p[1]); ctx.moveTo(p[0] + r + 6, p[1]); ctx.lineTo(p[0] + r + 12, p[1]); ctx.stroke();
+    }
+  }
+
+  let dirty = true;
+  function loop(ts) {
+    if (state.view === 'globe' && state.spin && !drag.active && !fly) { rot[0] += .045; proj.rotate(rot); }
+    if (state.playing) stepPlay(ts);
+    draw(ts);
+    requestAnimationFrame(loop);
+  }
+
+  // drag + hover + click
+  const drag = { active: false, moved: 0, x: 0, y: 0 };
+  canvas.addEventListener('pointerdown', e => { drag.active = true; drag.moved = 0; drag.x = e.clientX; drag.y = e.clientY; canvas.setPointerCapture(e.pointerId); });
+  canvas.addEventListener('pointermove', e => {
+    if (drag.active) {
+      const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag.moved += Math.abs(dx) + Math.abs(dy); drag.x = e.clientX; drag.y = e.clientY;
+      if (state.view === 'globe' && drag.moved > 3) { canvas.classList.add('dragging'); stopSpin(); const k = 90 / proj.scale() * 1.4; rot[0] += dx * k * 2; rot[1] = Math.max(-70, Math.min(70, rot[1] - dy * k * 2)); proj.rotate(rot); tip.hidden = true; return; }
+    }
+    hover(e);
+  });
+  canvas.addEventListener('pointerup', e => {
+    canvas.classList.remove('dragging');
+    if (drag.moved < 4) { const h = hit(e); if (h) select(h.q.id, false); }
+    drag.active = false;
+  });
+  canvas.addEventListener('pointerleave', () => { tip.hidden = true; });
+  function hit(e) {
+    const b = canvas.getBoundingClientRect(), mx = e.clientX - b.left, my = e.clientY - b.top;
+    let best = null, bd = 1e9;
+    for (const p of pts) { const d = Math.hypot(p.x - mx, p.y - my); if (d < Math.max(9, p.r + 4) && d < bd) { bd = d; best = p; } }
+    return best && { ...best, mx, my };
+  }
+  function hover(e) {
+    const h = hit(e);
+    if (!h) { tip.hidden = true; canvas.style.cursor = ''; return; }
+    canvas.style.cursor = 'pointer';
+    const q = h.q;
+    tip.innerHTML = `<b>M${q.mag.toFixed(1)}</b> · ${esc(q.place)}<br><span class="s">${q.depth} km deep · ${fmtIST(q.t)} · ${agoTxt((SNAP - q.t) / 60000)}</span>`;
+    const wrap = $('mapwrap').getBoundingClientRect();
+    tip.style.left = Math.min(h.x, wrap.width - 270) + 'px'; tip.style.top = h.y + 'px'; tip.hidden = false;
+  }
+
+  // fly-to
+  let fly = null;
+  function flyTo(q) {
+    if (state.view !== 'globe') return;
+    stopSpin();
+    const from = [...rot], to = [-q.lon, Math.max(-60, Math.min(60, -q.lat))];
+    if (to[0] - from[0] > 180) to[0] -= 360; if (from[0] - to[0] > 180) to[0] += 360;
+    const it = d3.interpolate(from, to), t0 = performance.now(), dur = reduceMotion ? 1 : 1100;
+    fly = true;
+    const step = now => { const k = Math.min(1, (now - t0) / dur), e = d3.easeCubicInOut(k); rot = it(e); proj.rotate(rot); if (k < 1) requestAnimationFrame(step); else fly = null; };
+    requestAnimationFrame(step);
+  }
+  function stopSpin() { if (state.spin) { state.spin = false; $('spinBtn').setAttribute('aria-pressed', 'false'); } }
+  $('spinBtn').addEventListener('click', () => { state.spin = !state.spin; $('spinBtn').setAttribute('aria-pressed', String(state.spin)); });
+
+  // coastlines: loaded at runtime from the CDN, map degrades to graticule + epicentres without them
+  function loadLand() {
+    const urls = ['https://cdn.jsdelivr.net/npm/@amcharts/amcharts4-geodata@4.1.28/worldLow.js', 'https://cdn.jsdelivr.net/npm/@amcharts/amcharts4-geodata@4.1.20/worldLow.js'];
+    const tryNext = i => {
+      if (i >= urls.length) { $('geoNote').hidden = false; return; }
+      const s = document.createElement('script'); s.src = urls[i]; s.async = true;
+      s.onload = () => { if (window.am4geodata_worldLow) { LAND = { type: 'FeatureCollection', features: window.am4geodata_worldLow.features }; } else tryNext(i + 1); };
+      s.onerror = () => tryNext(i + 1);
+      document.head.appendChild(s);
+    };
+    tryNext(0);
+  }
+
+  // ---------- replay ----------
+  let playStart = 0;
+  const PLAY_MS = 22000;
+  function winStart() { return SNAP - state.win * 60000; }
+  function setPlayT(t) { state.playT = t >= SNAP - 1000 ? null : t; render(false); }
+  function stepPlay(ts) {
+    const k = (ts - playStart) / PLAY_MS, t = winStart() + k * (SNAP - winStart());
+    if (t >= SNAP) { state.playing = false; setPlayIcon(); setPlayT(SNAP); return; }
+    if (Math.floor(ts / 90) !== Math.floor((ts - 17) / 90)) setPlayT(t); else state.playT = t;
+  }
+  function setPlayIcon() { $('playIcon').innerHTML = state.playing ? '<path d="M0 0h4v14H0zM8 0h4v14H8z"/>' : '<path d="M0 0l12 7-12 7z"/>'; $('playBtn').setAttribute('aria-label', state.playing ? 'Pause replay' : 'Replay the window'); }
+  $('playBtn').addEventListener('click', () => {
+    if (state.playing) { state.playing = false; setPlayIcon(); return; }
+    const from = state.playT == null ? winStart() : state.playT;
+    playStart = performance.now() - ((from - winStart()) / (SNAP - winStart())) * PLAY_MS;
+    if (state.playT == null) setPlayT(winStart() + 1);
+    state.playing = true; setPlayIcon();
+  });
+  $('scrub').addEventListener('input', e => { state.playing = false; setPlayIcon(); setPlayT(winStart() + (+e.target.value / 1000) * (SNAP - winStart())); });
+
+  function drawScrub() {
+    const svg = $('scrubSvg'); svg.innerHTML = '';
+    const b = svg.getBoundingClientRect(); const w = Math.max(100, b.width), h = 34;
+    svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+    const bins = 84, start = winStart(), span = SNAP - start, counts = new Array(bins).fill(0);
+    Q.forEach(q => { if (q.t >= start && q.mag >= state.minMag && (!state.region || q.region === state.region)) counts[Math.min(bins - 1, Math.floor((q.t - start) / span * bins))]++; });
+    const mx = Math.max(1, ...counts), bw = w / bins, now = T(), cut = (now - start) / span * w;
+    counts.forEach((c, i) => { if (!c) return; const bh = Math.max(2, c / mx * (h - 8)); el('rect', { x: i * bw + .5, y: h - 3 - bh, width: Math.max(1, bw - 1.5), height: bh, rx: 1, fill: i * bw < cut ? css('--m2') : css('--line-2') }, svg); });
+    el('line', { x1: 0, x2: w, y1: h - 2.5, y2: h - 2.5, stroke: css('--line-2') }, svg);
+    el('line', { x1: cut, x2: cut, y1: 2, y2: h, stroke: css('--accent'), 'stroke-width': 2 }, svg);
+    el('circle', { cx: cut, cy: 4, r: 3.5, fill: css('--accent') }, svg);
+    $('scrub').value = Math.round((now - start) / span * 1000);
+    $('clock').textContent = state.playT ? fmtIST(now) : 'Live · ' + fmtIST(SNAP, false);
+  }
+
+  // ---------- spotlight ----------
+  function spotlight() {
+    let q = state.selected != null ? Q[state.selected] : null, label = 'Selected event';
+    if (!q || !inWin.includes(q)) { q = sel.reduce((a, b) => (!a || b.mag > a.mag ? b : a), null); label = state.region ? `Strongest in ${state.region}` : 'Strongest in view'; }
+    $('spotEyebrow').textContent = label;
+    if (!q) { $('spotMag').innerHTML = '<small>M</small>–'; $('spotPlace').textContent = 'No events match these filters'; $('spotFacts').innerHTML = ''; $('seis').innerHTML = ''; $('flyBtn').hidden = true; return null; }
+    $('flyBtn').hidden = state.view !== 'globe';
+    $('spotMag').innerHTML = `<small>M</small>${q.mag.toFixed(1)}`;
+    $('spotPlace').textContent = q.place;
+    const near = inWin.filter(o => o !== q && hav(o, q) <= 150).length;
+    const facts = [['Origin time', fmtIST(q.t)], ['Depth', `${q.depth} km · ${q.depth < 70 ? 'shallow' : q.depth < 300 ? 'intermediate' : 'deep'}`], ['Energy ≈ TNT', tnt(energyJ(q.mag))], ['Felt reports', q.felt ? q.felt.toLocaleString('en-IN') : 'none'], ['Within 150 km', `${near} other event${near === 1 ? '' : 's'}`], ['Coordinates', `${Math.abs(q.lat).toFixed(2)}°${q.lat >= 0 ? 'N' : 'S'} ${Math.abs(q.lon).toFixed(2)}°${q.lon >= 0 ? 'E' : 'W'}`]];
+    $('spotFacts').innerHTML = facts.map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('');
+    // synthetic seismogram scaled to magnitude (illustrative trace)
+    const svg = $('seis'); svg.innerHTML = '';
+    let seed = q.id * 9301 + 49297; const rnd = () => (seed = (seed * 9301 + 49297) % 233280) / 233280;
+    const amp = Math.min(1, (q.mag - 2) / 5), pts2 = [];
+    for (let i = 0; i <= 300; i += 1.5) {
+      const p = i < 70 ? .05 : i < 110 ? .35 * Math.exp(-(i - 70) / 60) + .05 : Math.exp(-(i - 110) / 70) + .03;
+      pts2.push(`${i},${23 + (rnd() - .5) * 2 * 21 * amp * p}`);
+    }
+    el('line', { x1: 0, x2: 300, y1: 23, y2: 23, stroke: css('--line'), 'vector-effect': 'non-scaling-stroke' }, svg);
+    el('polyline', { points: pts2.join(' '), fill: 'none', stroke: css('--accent'), 'stroke-width': 1.3, 'vector-effect': 'non-scaling-stroke', 'stroke-linejoin': 'round' }, svg);
+    return q;
+  }
+  $('flyBtn').addEventListener('click', () => { const q = state.selected != null ? Q[state.selected] : sel.reduce((a, b) => (!a || b.mag > a.mag ? b : a), null); if (q) flyTo(q); });
+
+  function select(id, fly = true) {
+    state.selected = state.selected === id && !fly ? null : id;
+    if (state.selected != null && fly) flyTo(Q[id]);
+    render(false);
+  }
+
+  // ---------- KPIs ----------
+  function spark(values, color) {
+    const n = values.length, mx = Math.max(1, ...values), w = 100 / n;
+    return `<svg viewBox="0 0 100 22" preserveAspectRatio="none" aria-hidden="true">${values.map((v, i) => `<rect x="${i * w + .6}" y="${22 - Math.max(1.5, v / mx * 20)}" width="${w - 1.2}" height="${Math.max(1.5, v / mx * 20)}" rx="1" fill="${color}" opacity="${i === n - 1 ? 1 : .55}"/>`).join('')}</svg>`;
+  }
+  function kpis() {
+    const days = Math.max(1, Math.round(state.win / 1440)), bins = state.win <= 1440 ? 12 : days * 2;
+    const start = winStart(), span = SNAP - start, bc = new Array(bins).fill(0);
+    sel.forEach(q => bc[Math.min(bins - 1, Math.floor((q.t - start) / span * bins))]++);
+    const m45 = sel.filter(q => q.mag >= 4.5), deep = sel.filter(q => q.depth >= 300);
+    const E = sel.reduce((s, q) => s + energyJ(q.mag), 0), top = sel.reduce((a, b) => (!a || b.mag > a.mag ? b : a), null);
+    const share = top && E ? Math.round(energyJ(top.mag) / E * 100) : 0;
+    const felt = sel.reduce((s, q) => s + q.felt, 0);
+    $('kpis').innerHTML = [
+      ['Earthquakes', sel.length, `${(sel.length / (state.win / 1440)).toFixed(0)} per day`, spark(bc, css('--m2'))],
+      ['M4.5 and above', m45.length, 'globally complete level', ''],
+      ['Energy released', E ? '≈ ' + tnt(E) : '–', top ? `${share}% from the strongest event` : 'TNT equivalent', ''],
+      ['Deep (≥300 km)', deep.length, `${felt.toLocaleString('en-IN')} felt reports in view`, '']
+    ].map(([l, v, s, sp]) => `<div class="kpi"><span class="l">${l}</span><span class="v">${v}</span><span class="s">${esc(s)}</span>${sp}</div>`).join('');
+  }
+
+  // ---------- feed ----------
+  function feed() {
+    const rows = [...sel].sort((a, b) => b.t - a.t).slice(0, 40);
+    $('feed').innerHTML = rows.length ? rows.map(q => `<li><button type="button" data-id="${q.id}" aria-current="${state.selected === q.id}">
+      <span class="mchip" style="background:var(${magVar(q.mag)});color:${magInk(q.mag)}">${q.mag.toFixed(1)}</span>
+      <span class="pl" title="${esc(q.place)}">${esc(q.place)}</span>
+      <span class="meta">${agoTxt((T() - q.t) / 60000)}<br>${q.depth} km</span></button></li>`).join('')
+      : '<li class="empty">No events match these filters. Lower the minimum magnitude or widen the window.</li>';
+  }
+  $('feed').addEventListener('click', e => { const b = e.target.closest('button[data-id]'); if (b) select(+b.dataset.id, true); });
+
+  // ---------- timeline ----------
+  const tipChart = document.createElement('div'); tipChart.className = 'tip'; tipChart.hidden = true; tipChart.style.position = 'fixed'; tipChart.style.transform = 'translate(12px, -100%)'; document.body.appendChild(tipChart);
+  const showTip = (e, html) => { tipChart.innerHTML = html; tipChart.hidden = false; tipChart.style.left = Math.min(e.clientX, innerWidth - 280) + 'px'; tipChart.style.top = e.clientY - 6 + 'px'; };
+  const hideTip = () => tipChart.hidden = true;
+
+  function timeline() {
+    const svg = $('timeline'); svg.innerHTML = '';
+    const Wd = 520, Ht = 250, L = 32, R = 6, Tp = 12, B = 26;
+    const step = state.win <= 1440 ? 60 : state.win <= 4320 ? 180 : 360;
+    $('tlTag').textContent = `events per ${step / 60} h`;
+    const nb = Math.ceil(state.win / step), start = winStart();
+    const bins = Array.from({ length: nb }, () => [0, 0, 0, 0]);
+    sel.forEach(q => { const i = Math.floor((q.t - start) / (step * 60000)); if (i >= 0 && i < nb) bins[i][q.mag >= 6 ? 3 : q.mag >= 5 ? 2 : q.mag >= 4 ? 1 : 0]++; });
+    const max = Math.max(1, ...bins.map(b => b[0] + b[1] + b[2] + b[3]));
+    const yMax = d3.nice(0, max, 4)[1] || max;
+    const y = d3.scaleLinear([0, yMax], [Ht - B, Tp]), bw = (Wd - L - R) / nb;
+    y.ticks(4).forEach(v => { el('line', { x1: L, x2: Wd - R, y1: y(v), y2: y(v), class: 'grid-l' }, svg); el('text', { x: L - 6, y: y(v) + 3.5, 'text-anchor': 'end' }, svg, v); });
+    const cols = ['--m1', '--m2', '--m3', '--m4'].map(css), labels = ['M2.5–4', 'M4–5', 'M5–6', 'M6+'];
+    bins.forEach((b, i) => {
+      let acc = 0; const x = L + i * bw + 1, w = Math.max(1, bw - 2);
+      b.forEach((v, j) => { if (!v) return; const y0 = y(acc), y1 = y(acc + v); el('rect', { x, y: y1 + (acc ? 1 : 0), width: w, height: Math.max(.5, y0 - y1 - (acc ? 1 : 0)), fill: cols[j], rx: j === b.findLastIndex(c => c > 0) ? Math.min(2, w / 3) : 0 }, svg); acc += v; });
+      const tot = b.reduce((s, v) => s + v, 0);
+      const h = el('rect', { x: L + i * bw, y: Tp, width: bw, height: Ht - B - Tp, class: 'hit' }, svg);
+      h.addEventListener('mousemove', e => showTip(e, `<b>${fmtIST(start + i * step * 60000)}</b><br><span class="s">${tot} event${tot === 1 ? '' : 's'}${tot ? ' · ' + b.map((v, j) => v ? `${labels[j]}: ${v}` : '').filter(Boolean).join(' · ') : ''}</span>`));
+      h.addEventListener('mouseleave', hideTip);
+    });
+    el('line', { x1: L, x2: Wd - R, y1: Ht - B, y2: Ht - B, class: 'axis-l' }, svg);
+    const tick = state.win <= 1440 ? 360 : 1440;
+    for (let m = 0; m <= state.win; m += tick) { const x = L + (Wd - L - R) * (1 - m / state.win); el('text', { x, y: Ht - 8, 'text-anchor': m === 0 ? 'end' : m === state.win ? 'start' : 'middle' }, svg, m === 0 ? 'now' : state.win <= 1440 ? `−${m / 60} h` : `−${m / 1440} d`); }
+    if (state.playT) { const x = L + (Wd - L - R) * ((state.playT - start) / (SNAP - start)); el('line', { x1: x, x2: x, y1: Tp, y2: Ht - B, stroke: css('--accent'), 'stroke-width': 1.5, 'stroke-dasharray': '3 3' }, svg); }
+  }
+
+  // ---------- regions ----------
+  function regions() {
+    const svg = $('regions'); svg.innerHTML = '';
+    const pool = Q.filter(q => q.t >= winStart() && q.t <= T() && q.mag >= state.minMag);
+    const counts = d3.rollups(pool, v => v.length, q => q.region).sort((a, b) => b[1] - a[1]).slice(0, 9);
+    if (!counts.length) { el('text', { x: 0, y: 20 }, svg, 'No events in this window'); return; }
+    const Wd = 300, rowH = 28, lab = 112, max = counts[0][1];
+    svg.setAttribute('viewBox', `0 0 ${Wd} ${counts.length * rowH + 2}`);
+    counts.forEach(([r, n], i) => {
+      const y = i * rowH + 2, on = state.region === r, off = state.region && !on;
+      el('text', { x: 0, y: y + 15, class: on ? 'ink' : 'ink2', style: `font-family:var(--f-body);font-size:12px;opacity:${off ? .45 : 1}` }, svg, r.length > 16 ? r.slice(0, 15) + '…' : r);
+      el('rect', { x: lab, y: y + 4, width: Wd - lab - 30, height: 14, rx: 3, fill: css('--panel-2') }, svg);
+      el('rect', { x: lab, y: y + 4, width: Math.max(4, (Wd - lab - 30) * n / max), height: 14, rx: 3, fill: on ? css('--accent') : css('--m2'), opacity: off ? .35 : 1 }, svg);
+      el('text', { x: Wd, y: y + 15, 'text-anchor': 'end', class: 'ink' }, svg, n);
+      const h = el('rect', { x: 0, y, width: Wd, height: rowH, class: 'hit', tabindex: 0, role: 'button', 'aria-label': `Filter to ${r}, ${n} events` }, svg);
+      const act = () => { state.region = on ? null : r; state.selected = null; render(); };
+      h.addEventListener('click', act); h.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); act(); } });
+      h.addEventListener('mousemove', e => showTip(e, `<b>${esc(r)}</b><br><span class="s">${n} event${n === 1 ? '' : 's'} · click to ${on ? 'clear filter' : 'filter'}</span>`));
+      h.addEventListener('mouseleave', hideTip);
+    });
+  }
+
+  // ---------- Gutenberg–Richter ----------
+  function gr() {
+    const svg = $('gr'); svg.innerHTML = '';
+    const data = inWin.map(q => q.mag), Mc = 4.5, Wd = 560, Ht = 280, L = 46, R = 12, Tp = 10, B = 34;
+    const above = data.filter(m => m >= Mc), n = above.length;
+    let b = null, err = null;
+    if (n >= 20) { const mean = d3.mean(above); b = Math.log10(Math.E) / (mean - (Mc - .05)); err = 2.3 * b * b * Math.sqrt(d3.sum(above, x => (x - mean) ** 2) / (n * (n - 1))); }
+    $('grStats').innerHTML = b ? `<div><b>${b.toFixed(2)}</b><span>b-value ± ${err.toFixed(2)}</span></div><div><b>${n}</b><span>events ≥ Mc ${Mc}</span></div><div><b>${data.length}</b><span>events in window</span></div>`
+      : `<div><span>A stable b-value needs at least 20 events at or above M${Mc}; this view has ${n}. Choose 7 d or clear the region filter.</span></div>`;
+    const x = d3.scaleLinear([2.5, 7], [L, Wd - R]);
+    const yMax = Math.ceil(Math.log10(Math.max(10, data.length)) * 2) / 2;
+    const y = d3.scaleLinear([0, yMax], [Ht - B, Tp]);
+    for (let v = 0; v <= yMax + 1e-9; v += .5) { el('line', { x1: L, x2: Wd - R, y1: y(v), y2: y(v), class: 'grid-l' }, svg); if (Number.isInteger(v)) el('text', { x: L - 6, y: y(v) + 3.5, 'text-anchor': 'end' }, svg, Math.pow(10, v).toLocaleString('en-IN')); }
+    for (let m = 3; m <= 7; m++) el('text', { x: x(m), y: Ht - 16, 'text-anchor': 'middle' }, svg, 'M' + m);
+    el('text', { x: (L + Wd - R) / 2, y: Ht - 2, 'text-anchor': 'middle' }, svg, 'magnitude');
+    el('rect', { x: L, y: Tp, width: x(Mc) - L, height: Ht - B - Tp, fill: css('--panel-2'), opacity: .6 }, svg);
+    el('text', { x: L + 6, y: Ht - B - 8 }, svg, 'below Mc: incomplete');
+    el('line', { x1: x(Mc), x2: x(Mc), y1: Tp, y2: Ht - B, stroke: css('--accent'), 'stroke-dasharray': '3 3' }, svg);
+    if (b) { const a = Math.log10(n) + b * Mc, m2 = d3.max(data); el('line', { x1: x(Mc), y1: y(a - b * Mc), x2: x(m2), y2: y(Math.max(0, a - b * m2)), stroke: css('--accent'), 'stroke-width': 2 }, svg); }
+    for (let m = 2.5; m <= 7.001; m += .1) {
+      const mm = +m.toFixed(1), c = data.filter(v => v >= mm - 1e-9).length; if (!c) continue;
+      const on = mm >= Mc;
+      const dot = el('circle', { cx: x(mm), cy: y(Math.log10(c)), r: on ? 4 : 3.2, fill: on ? css('--m4') : css('--muted'), stroke: css('--panel'), 'stroke-width': 1.5, opacity: on ? 1 : .55 }, svg);
+      const h = el('circle', { cx: x(mm), cy: y(Math.log10(c)), r: 9, class: 'hit' }, svg);
+      h.addEventListener('mousemove', e => showTip(e, `<b>M ≥ ${mm.toFixed(1)}</b><br><span class="s">${c} event${c === 1 ? '' : 's'}</span>`)); h.addEventListener('mouseleave', hideTip);
+    }
+    el('line', { x1: L, x2: Wd - R, y1: Ht - B, y2: Ht - B, class: 'axis-l' }, svg);
+  }
+
+  // ---------- depth cross-section ----------
+  function depth() {
+    const svg = $('depth'); svg.innerHTML = '';
+    const Wd = 560, Ht = 320, L = 54, R = 12, Tp = 10, B = 30;
+    const x = d3.scaleLinear([2.5, 7], [L, Wd - R]), y = d3.scaleLinear([0, 700], [Tp, Ht - B]);
+    el('rect', { x: L, y: y(300), width: Wd - L - R, height: y(700) - y(300), fill: css('--panel-2'), opacity: .55 }, svg);
+    [0, 70, 300, 500, 700].forEach(d => { el('line', { x1: L, x2: Wd - R, y1: y(d), y2: y(d), class: 'grid-l', 'stroke-dasharray': d === 70 || d === 300 ? '4 3' : '' }, svg); el('text', { x: L - 6, y: y(d) + 3.5, 'text-anchor': 'end' }, svg, d + ' km'); });
+    el('text', { x: Wd - R - 4, y: y(70) + 14, 'text-anchor': 'end' }, svg, 'intermediate');
+    el('text', { x: Wd - R - 4, y: y(300) + 14, 'text-anchor': 'end' }, svg, 'deep · slab events');
+    for (let m = 3; m <= 7; m++) el('text', { x: x(m), y: Ht - 10, 'text-anchor': 'middle' }, svg, 'M' + m);
+    [...sel].sort((a, b) => a.mag - b.mag).forEach(q => {
+      const on = state.selected === q.id;
+      el('circle', { cx: x(q.mag), cy: y(Math.min(700, q.depth)), r: on ? 6 : 4, fill: css(depthVar(q.depth)), stroke: on ? css('--ink') : css('--panel'), 'stroke-width': on ? 2 : 1.5, opacity: .9 }, svg);
+      const h = el('circle', { cx: x(q.mag), cy: y(Math.min(700, q.depth)), r: 8, class: 'hit' }, svg);
+      h.addEventListener('mousemove', e => showTip(e, `<b>M${q.mag.toFixed(1)}</b> · ${q.depth} km<br><span class="s">${esc(q.place)}</span>`)); h.addEventListener('mouseleave', hideTip);
+      h.addEventListener('click', () => select(q.id, true));
+    });
+  }
+
+  // ---------- sequences ----------
+  function sequences() {
+    const pool = [...inWin].sort((a, b) => b.mag - a.mag), used = new Set(), out = [];
+    for (const m of pool) {
+      if (m.mag < 5 || used.has(m)) continue;
+      const mem = pool.filter(q => !used.has(q) && hav(m, q) <= 150);
+      if (mem.length < 3) continue;
+      mem.forEach(q => used.add(q));
+      const ms = mem.map(q => q.mag).sort((a, b) => b - a), span = (d3.max(mem, q => q.t) - d3.min(mem, q => q.t)) / 3600000;
+      out.push({ m, count: mem.length, span, dmed: median(mem.map(q => q.depth)), gap: ms[0] - ms[1] });
+    }
+    out.sort((a, b) => b.count - a.count);
+    $('seq').innerHTML = out.length ? out.slice(0, 8).map(s => {
+      const swarm = s.gap < .5;
+      return `<tr data-id="${s.m.id}" tabindex="0"><td>${esc(s.m.place)}</td>
+        <td class="n"><span class="mchip" style="display:inline-block;min-width:42px;background:var(${magVar(s.m.mag)});color:${magInk(s.m.mag)}">${s.m.mag.toFixed(1)}</span></td>
+        <td class="n">${s.count}</td><td class="n">${s.span < 48 ? s.span.toFixed(0) + ' h' : (s.span / 24).toFixed(1) + ' d'}</td><td class="n">${Math.round(s.dmed)} km</td>
+        <td><span class="pill ${swarm ? 'warn' : ''}">${s.gap.toFixed(1)} · ${swarm ? 'swarm-like' : 'mainshock–aftershock'}</span></td></tr>`;
+    }).join('') : '<tr><td colspan="6" class="empty">No clusters of 3 or more events around an M5+ event in this view.</td></tr>';
+  }
+  const seqAct = e => { const r = e.target.closest('tr[data-id]'); if (r) select(+r.dataset.id, true); };
+  $('seq').addEventListener('click', seqAct);
+  $('seq').addEventListener('keydown', e => { if (e.key === 'Enter') seqAct(e); });
+
+  // ---------- render ----------
+  function syncControls() {
+    document.querySelectorAll('#win button').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.v === state.win)));
+    document.querySelectorAll('#mag button').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.v === state.minMag)));
+    document.querySelectorAll('#view button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === state.view)));
+    $('spinBtn').parentElement.hidden = state.view !== 'globe';
+    const chip = $('regionChip');
+    if (state.region) { chip.hidden = false; chip.className = 'chip'; chip.innerHTML = `Region: ${esc(state.region)} <button type="button" aria-label="Clear region filter">×</button>`; chip.querySelector('button').onclick = () => { state.region = null; render(); }; }
+    else chip.hidden = true;
+  }
+  function render(full = true) {
+    derive(); syncControls();
+    $('count').textContent = `${sel.length} of ${Q.length} events`;
+    $('ovK').textContent = state.playT ? 'Replay' : 'Showing';
+    $('ovV').textContent = `${sel.length} earthquakes · ${state.win === 1440 ? '24 h' : state.win === 4320 ? '3 days' : '7 days'}`;
+    spotlight(); kpis(); feed(); timeline(); regions(); drawScrub();
+    if (full || !state.playing) { gr(); depth(); sequences(); }
+    save();
+  }
+
+  const bind = (id, key, cast) => document.querySelectorAll(`#${id} button`).forEach(b => b.addEventListener('click', () => {
+    state[key] = cast(b.dataset.v);
+    if (key === 'win') { state.playT = null; state.playing = false; setPlayIcon(); }
+    if (key === 'view') { makeProj(); }
+    render();
+  }));
+  bind('win', 'win', Number); bind('mag', 'minMag', Number); bind('view', 'view', String);
+
+  // ---------- boot ----------
+  resize();
+  new ResizeObserver(() => { resize(); drawScrub(); }).observe($('mapwrap'));
+  loadLand();
+  render();
+  requestAnimationFrame(loop);
+  $('liveLbl').textContent = LIVE ? 'Live · USGS feed' : 'Offline snapshot';
+  document.querySelector('.status').classList.toggle('offline', !LIVE);
+}
+</script>
+<script>
+// Live loader: pulls the USGS M2.5+ past-7-days feed in the visitor's browser,
+// converts it to the console's compact format, and falls back to the bundled snapshot.
+(() => {
+  const FEED = 'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_week.geojson';
+  const clean = s => String(s || 'Unknown location').replace(/[~;\n]/g, ' ');
+  const toText = gj => {
+    const now = Date.now();
+    const rows = gj.features.filter(f => f.properties.type === 'earthquake' && f.properties.mag != null && f.geometry)
+      .map(f => { const p = f.properties, [lon, lat, dep] = f.geometry.coordinates;
+        return [Math.max(0, Math.round((now - p.time) / 60000)), p.mag.toFixed(1), lat.toFixed(2), lon.toFixed(2), Math.round(dep), p.felt || 0, clean(p.place)].join('~'); });
+    return new Date(now).toISOString() + '\n' + rows.join(';');
+  };
+  let lastSig = null;
+  const sig = gj => gj.features.length + ':' + (gj.metadata && gj.metadata.generated);
+  const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), 8000);
+  fetch(FEED, { signal: ctl.signal, cache: 'no-store' }).then(r => r.ok ? r.json() : Promise.reject(r.status))
+    .then(gj => { clearTimeout(timer); lastSig = sig(gj); document.getElementById('data').textContent = toText(gj); startConsole(true); })
+    .catch(() => {
+      const d = document.createElement('div');
+      d.setAttribute('role', 'alert');
+      d.style.cssText = 'position:fixed;inset:0;display:grid;place-items:center;background:rgba(10,12,16,.92);z-index:99;font:15px/1.5 system-ui,sans-serif;color:#F2EEE8;text-align:center;padding:24px';
+      d.innerHTML = '<div><b style="font-size:18px">The USGS live feed could not be reached</b><br><span style="color:#9AA1AC">It is usually back within a minute.</span><br><br><button onclick="location.reload()" style="font:inherit;padding:8px 16px;border-radius:8px;border:1px solid #E07B3C;background:transparent;color:#E07B3C;cursor:pointer">Try again</button></div>';
+      document.body.appendChild(d);
+    });
+  // Every 5 minutes, check for new events; reload quietly only when the viewer is idle.
+  let lastInput = Date.now();
+  ['pointerdown', 'keydown', 'wheel'].forEach(e => addEventListener(e, () => lastInput = Date.now(), { passive: true }));
+  setInterval(() => {
+    if (document.hidden || Date.now() - lastInput < 120000) return;
+    fetch(FEED, { cache: 'no-store' }).then(r => r.json()).then(gj => { if (lastSig && sig(gj) !== lastSig) location.reload(); }).catch(() => {});
+  }, 300000);
+})();
+</script>
+
+<script>
+// Point "Source & architecture" at this repo automatically when hosted on GitHub Pages (user.github.io/repo/).
+(() => { const m = location.hostname.match(/^([^.]+)\.github\.io$/), r = location.pathname.split('/').filter(Boolean)[0];
+  if (m && r) document.getElementById('repoLink').href = `https://github.com/${m[1]}/${r}`; })();
+</script>
+</body>
+</html>

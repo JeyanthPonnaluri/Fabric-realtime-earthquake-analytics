@@ -1,0 +1,12 @@
+.create-or-alter function with (folder = "Ingest", docstring = "Silver rows for raw events not yet in Quakes") Fn_NewSilverRows() {
+    Fn_QuakesRawToSilver()
+    | join kind = leftanti (Quakes | where IngestedAt > ago(35d) | distinct EventId, Updated) on EventId, Updated
+}
+
+.set-or-append Quakes <| Fn_NewSilverRows()
+
+print RawRows = toscalar(QuakesRaw | count), SilverRows = toscalar(Quakes | count), LatestEvents = toscalar(QuakesLatest | count), NewestEvent = toscalar(Quakes | summarize max(EventTime))
+
+// Each scheduled run executes these two commands in order:
+// .set-or-append QuakesRaw <| Fn_UsgsNewEvents()
+// .set-or-append Quakes <| Fn_NewSilverRows()

@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 560" width="1200" height="560" font-family="Segoe UI, Inter, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#E07B3C"/></marker>
+    <marker id="g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#6B7380"/></marker>
+  </defs>
+  <rect width="1200" height="560" rx="18" fill="#101318"/>
+  <text x="40" y="52" fill="#F2EEE8" font-size="24" font-weight="700">Real-Time Global Earthquake Analytics on Microsoft Fabric</text>
+  <text x="40" y="78" fill="#9AA1AC" font-size="14">Keyless, incremental ingestion · medallion Eventhouse · self-refreshing Real-Time Dashboard</text>
+
+  <!-- Fabric boundary -->
+  <rect x="250" y="110" width="910" height="300" rx="14" fill="none" stroke="#2C333D" stroke-dasharray="6 6"/>
+  <text x="270" y="134" fill="#6B7380" font-size="12" letter-spacing="1.5">MICROSOFT FABRIC · REAL-TIME INTELLIGENCE WORKSPACE</text>
+
+  <!-- Source -->
+  <rect x="40" y="200" width="170" height="120" rx="12" fill="#181C22" stroke="#3A414C"/>
+  <text x="125" y="236" fill="#F2EEE8" font-size="16" font-weight="700" text-anchor="middle">USGS feed</text>
+  <text x="125" y="258" fill="#9AA1AC" font-size="12.5" text-anchor="middle">Global GeoJSON</text>
+  <text x="125" y="276" fill="#9AA1AC" font-size="12.5" text-anchor="middle">updated every minute</text>
+  <text x="125" y="300" fill="#E07B3C" font-size="12" text-anchor="middle">public · no API key</text>
+
+  <!-- Ingest -->
+  <rect x="280" y="190" width="190" height="140" rx="12" fill="#181C22" stroke="#E07B3C"/>
+  <text x="375" y="222" fill="#E07B3C" font-size="11" text-anchor="middle" letter-spacing="1.2">INGEST</text>
+  <text x="375" y="246" fill="#F2EEE8" font-size="15.5" font-weight="700" text-anchor="middle">Scheduled notebook</text>
+  <text x="375" y="268" fill="#9AA1AC" font-size="12.5" text-anchor="middle">every 5 min · PySpark</text>
+  <text x="375" y="288" fill="#9AA1AC" font-size="12.5" text-anchor="middle">KQL externaldata pull</text>
+  <text x="375" y="308" fill="#9AA1AC" font-size="12.5" text-anchor="middle">new + revised events only</text>
+
+  <!-- Eventhouse -->
+  <rect x="500" y="150" width="390" height="230" rx="12" fill="#181C22" stroke="#3FB5A8"/>
+  <text x="695" y="178" fill="#3FB5A8" font-size="11" text-anchor="middle" letter-spacing="1.2">STORE &amp; PROCESS · EVENTHOUSE (KQL DATABASE)</text>
+  <rect x="520" y="196" width="160" height="70" rx="9" fill="#21262E" stroke="#8C5A3C"/>
+  <text x="600" y="224" fill="#F2EEE8" font-size="14" font-weight="700" text-anchor="middle">Bronze</text>
+  <text x="600" y="246" fill="#9AA1AC" font-size="12.5" text-anchor="middle">QuakesRaw</text>
+  <rect x="710" y="196" width="160" height="70" rx="9" fill="#21262E" stroke="#A9B4C2"/>
+  <text x="790" y="224" fill="#F2EEE8" font-size="14" font-weight="700" text-anchor="middle">Silver</text>
+  <text x="790" y="246" fill="#9AA1AC" font-size="11.5" text-anchor="middle">Quakes · typed, enriched</text>
+  <line x1="680" y1="231" x2="706" y2="231" stroke="#E07B3C" stroke-width="2" marker-end="url(#a)"/>
+  <rect x="520" y="286" width="350" height="76" rx="9" fill="#21262E" stroke="#3FB5A8" stroke-opacity=".6"/>
+  <text x="695" y="310" fill="#F2EEE8" font-size="14" font-weight="700" text-anchor="middle">Materialized views</text>
+  <text x="695" y="331" fill="#9AA1AC" font-size="12.5" text-anchor="middle">QuakesLatest · latest revision per event</text>
+  <text x="695" y="349" fill="#9AA1AC" font-size="12.5" text-anchor="middle">QuakesHourly · pre-aggregated rollups</text>
+  <line x1="790" y1="266" x2="790" y2="282" stroke="#E07B3C" stroke-width="2" marker-end="url(#a)"/>
+
+  <!-- Serve -->
+  <rect x="920" y="160" width="220" height="100" rx="12" fill="#181C22" stroke="#E07B3C"/>
+  <text x="1030" y="190" fill="#E07B3C" font-size="11" text-anchor="middle" letter-spacing="1.2">SERVE</text>
+  <text x="1030" y="214" fill="#F2EEE8" font-size="15.5" font-weight="700" text-anchor="middle">Real-Time Dashboard</text>
+  <text x="1030" y="236" fill="#9AA1AC" font-size="12.5" text-anchor="middle">auto-refresh · 8 tiles · as code</text>
+  <rect x="920" y="280" width="220" height="100" rx="12" fill="#181C22" stroke="#3A414C"/>
+  <text x="1030" y="310" fill="#9AA1AC" font-size="11" text-anchor="middle" letter-spacing="1.2">ANALYSE</text>
+  <text x="1030" y="334" fill="#F2EEE8" font-size="15.5" font-weight="700" text-anchor="middle">KQL / Power BI</text>
+  <text x="1030" y="356" fill="#9AA1AC" font-size="12.5" text-anchor="middle">research queries · DAX</text>
+
+  <!-- flows -->
+  <line x1="210" y1="260" x2="276" y2="260" stroke="#E07B3C" stroke-width="2.5" marker-end="url(#a)"/>
+  <line x1="470" y1="231" x2="516" y2="231" stroke="#E07B3C" stroke-width="2.5" marker-end="url(#a)"/>
+  <line x1="890" y1="210" x2="916" y2="210" stroke="#E07B3C" stroke-width="2.5" marker-end="url(#a)"/>
+  <line x1="890" y1="330" x2="916" y2="330" stroke="#E07B3C" stroke-width="2.5" marker-end="url(#a)"/>
+
+  <!-- public demo lane -->
+  <rect x="250" y="440" width="910" height="84" rx="14" fill="#14171C" stroke="#2C333D"/>
+  <text x="270" y="466" fill="#6B7380" font-size="12" letter-spacing="1.5">PUBLIC DEMO · GITHUB PAGES</text>
+  <text x="270" y="496" fill="#F2EEE8" font-size="15" font-weight="700">Global Quake Watch console</text>
+  <text x="510" y="496" fill="#9AA1AC" font-size="13">D3.js globe · time replay · Gutenberg–Richter · reads the USGS feed live in the browser</text>
+  <path d="M125 320 V482 H246" fill="none" stroke="#6B7380" stroke-width="2" stroke-dasharray="5 5" marker-end="url(#g)"/>
+</svg>

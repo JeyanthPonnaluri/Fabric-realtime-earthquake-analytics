@@ -1,0 +1,144 @@
+// =====================================================================
+//  Eventhouse / KQL Database setup — Global Earthquake Real-Time Analytics
+//  Run each command block separately in a KQL Queryset attached to your
+//  KQL database (e.g. "QuakeDB"). Order matters.
+//
+//  Medallion inside Eventhouse:
+//    QuakesRaw  (bronze)  <- Eventstream lands JSON here
+//    Quakes     (silver)  <- update policy: typed, enriched, quality flags
+//    QuakesLatest (gold MV) <- latest revision per event (USGS revises events)
+//    QuakesHourly (gold MV) <- pre-aggregated for fast dashboard tiles
+// =====================================================================
+
+
+// ---------- 1. Bronze table (matches the producer's JSON exactly) ----------
+.create-merge table QuakesRaw (
+    EventId: string, Updated: datetime, EventTime: datetime,
+    Magnitude: real, MagType: string, Place: string, Region: string,
+    Latitude: real, Longitude: real, DepthKm: real,
+    Significance: int, Tsunami: int, Felt: int, Cdi: real, Mmi: real,
+    Alert: string, Status: string, EventType: string, Network: string,
+    Nst: int, Gap: real, Rms: real, Dmin: real, Url: string,
+    ProducedAt: datetime
+)
+
+.create-or-alter table QuakesRaw ingestion json mapping "QuakesRaw_mapping"
+```
+[
+  {"column":"EventId","path":"$.EventId"},
+  {"column":"Updated","path":"$.Updated"},
+  {"column":"EventTime","path":"$.EventTime"},
+  {"column":"Magnitude","path":"$.Magnitude"},
+  {"column":"MagType","path":"$.MagType"},
+  {"column":"Place","path":"$.Place"},
+  {"column":"Region","path":"$.Region"},
+  {"column":"Latitude","path":"$.Latitude"},
+  {"column":"Longitude","path":"$.Longitude"},
+  {"column":"DepthKm","path":"$.DepthKm"},
+  {"column":"Significance","path":"$.Significance"},
+  {"column":"Tsunami","path":"$.Tsunami"},
+  {"column":"Felt","path":"$.Felt"},
+  {"column":"Cdi","path":"$.Cdi"},
+  {"column":"Mmi","path":"$.Mmi"},
+  {"column":"Alert","path":"$.Alert"},
+  {"column":"Status","path":"$.Status"},
+  {"column":"EventType","path":"$.EventType"},
+  {"column":"Network","path":"$.Network"},
+  {"column":"Nst","path":"$.Nst"},
+  {"column":"Gap","path":"$.Gap"},
+  {"column":"Rms","path":"$.Rms"},
+  {"column":"Dmin","path":"$.Dmin"},
+  {"column":"Url","path":"$.Url"},
+  {"column":"ProducedAt","path":"$.ProducedAt"}
+]
+```
+
+
+// ---------- 2. Silver table ----------
+.create-merge table Quakes (
+    EventId: string, Updated: datetime, EventTime: datetime,
+    Magnitude: real, MagType: string, MagBand: string,
+    Place: string, Region: string,
+    Latitude: real, Longitude: real, DepthKm: real, DepthClass: string,
+    Hemisphere: string,
+    Significance: int, Tsunami: bool, Felt: int, Cdi: real, Mmi: real,
+    Alert: string, Status: string, EventType: string, Network: string,
+    Nst: int, Gap: real, Rms: real, Dmin: real,
+    QualityFlag: string,          // "good" | "poor_azimuthal_gap" | "few_stations"
+    PublishLagSec: real,          // USGS publication delay (EventTime -> first seen)
+    IngestedAt: datetime, Url: string
+)
+
+
+// ---------- 3. Transformation function (bronze -> silver) ----------
+.create-or-alter function with (folder = "ETL", docstring = "Type, enrich and quality-flag raw quakes")
+Fn_QuakesRawToSilver() {
+    QuakesRaw
+    | where isnotempty(EventId) and isnotnull(EventTime)
+    | extend MagBand = case(
+            isnull(Magnitude), "Unknown",
+            Magnitude < 2.5, "Micro (<2.5)",
+            Magnitude < 4.0, "Minor (2.5–4)",
+            Magnitude < 5.0, "Light (4–5)",
+            Magnitude < 6.0, "Moderate (5–6)",
+            Magnitude < 7.0, "Strong (6–7)",
+                             "Major (7+)")
+    | extend DepthClass = case(
+            isnull(DepthKm), "Unknown",
+            DepthKm < 70,  "Shallow (<70 km)",
+            DepthKm < 300, "Intermediate (70–300 km)",
+                           "Deep (300+ km)")
+    | extend Hemisphere = iff(Latitude >= 0, "North", "South")
+    | extend QualityFlag = case(
+            Gap > 180, "poor_azimuthal_gap",
+            Nst > 0 and Nst < 5, "few_stations",
+            "good")
+    | project EventId, Updated, EventTime, Magnitude, MagType, MagBand,
+              Place, Region, Latitude, Longitude, DepthKm, DepthClass, Hemisphere,
+              Significance, Tsunami = (Tsunami == 1), Felt, Cdi, Mmi,
+              Alert, Status, EventType, Network, Nst, Gap, Rms, Dmin,
+              QualityFlag,
+              PublishLagSec = datetime_diff('second', ProducedAt, EventTime) * 1.0,
+              IngestedAt = ingestion_time(), Url
+}
+
+.alter table Quakes policy update
+@'[{"IsEnabled": true, "Source": "QuakesRaw", "Query": "Fn_QuakesRawToSilver()", "IsTransactional": true, "PropagateIngestionProperties": false}]'
+
+
+// ---------- 4. Gold: latest revision of each event ----------
+// USGS revises events (status automatic -> reviewed, magnitude updates).
+// Always analyse THIS view, never raw counts, or you will double count.
+.create materialized-view with (backfill = true) QuakesLatest on table Quakes
+{
+    Quakes
+    | summarize arg_max(Updated, *) by EventId
+}
+
+
+// ---------- 5. Gold: hourly aggregate for fast tiles ----------
+.create materialized-view with (backfill = true) QuakesHourly on table Quakes
+{
+    Quakes
+    | summarize Events = dcount(EventId), MaxMag = max(Magnitude),
+                SumSig = sum(Significance)
+      by Hour = bin(EventTime, 1h), Region, MagBand, EventType
+}
+
+
+// ---------- 6. Retention & caching (control capacity cost) ----------
+.alter-merge table QuakesRaw policy retention softdelete = 30d recoverability = disabled
+.alter table QuakesRaw policy caching hot = 3d
+.alter-merge table Quakes policy retention softdelete = 3650d
+.alter table Quakes policy caching hot = 90d
+
+
+// ---------- 7. Optional: expose to OneLake as Delta (for Lakehouse / Direct Lake) ----------
+// Easiest in UI: KQL database -> OneLake availability -> On.
+// Then in a Lakehouse: New shortcut -> Microsoft OneLake -> QuakeDB -> Quakes.
+
+
+// ---------- 8. Smoke test ----------
+QuakesRaw | count;
+Quakes | take 10;
+QuakesLatest | summarize Events = count(), Latest = max(EventTime);

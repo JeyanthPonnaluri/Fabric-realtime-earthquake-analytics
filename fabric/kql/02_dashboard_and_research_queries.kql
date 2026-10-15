@@ -1,0 +1,145 @@
+// =====================================================================
+//  Dashboard tiles + research queries
+//  Use these as tiles in a Fabric Real-Time Dashboard, or as tables in
+//  a Power BI DirectQuery (KQL) semantic model.
+//  Real-Time Dashboard parameters assumed:
+//    _startTime, _endTime  (time range)     _minMag (real, default 2.5)
+// =====================================================================
+
+// ---------------- LIVE OPERATIONS PAGE ----------------
+
+// Tile: KPI — events in range, strongest event, tsunami flags, felt reports
+QuakesLatest
+| where EventTime between (_startTime .. _endTime) and EventType == "earthquake"
+| summarize Events = count(),
+            M4Plus = countif(Magnitude >= 4),
+            MaxMag = max(Magnitude),
+            TsunamiFlags = countif(Tsunami),
+            FeltReports = sum(Felt)
+
+// Tile: Map (Real-Time Dashboard "Map" visual, bubble size = Magnitude)
+QuakesLatest
+| where EventTime between (_startTime .. _endTime) and Magnitude >= _minMag
+| project Latitude, Longitude, Magnitude, DepthKm, Place, EventTime, MagBand
+
+// Tile: Live feed — most recent significant events
+QuakesLatest
+| where EventTime between (_startTime .. _endTime) and Magnitude >= _minMag
+| top 25 by EventTime desc
+| project EventTime, Magnitude, Place, DepthKm, Status, Alert, Tsunami, Url
+
+// Tile: Events per hour by magnitude band (stacked column / timechart)
+QuakesHourly
+| where Hour between (_startTime .. _endTime) and EventType == "earthquake"
+| summarize Events = sum(Events) by Hour, MagBand
+| order by Hour asc
+
+// Tile: Top regions
+QuakesLatest
+| where EventTime between (_startTime .. _endTime) and Magnitude >= _minMag
+| summarize Events = count(), MaxMag = max(Magnitude) by Region
+| top 10 by Events
+
+// Tile: Pipeline health — data freshness & USGS publication lag
+Quakes
+| where IngestedAt > ago(6h)
+| summarize LastIngest = max(IngestedAt),
+            MinutesSinceLastIngest = datetime_diff('minute', now(), max(IngestedAt)),
+            P50PublishLagMin = percentile(PublishLagSec, 50) / 60,
+            P95PublishLagMin = percentile(PublishLagSec, 95) / 60
+
+
+// ---------------- RESEARCH PAGE ----------------
+
+// R1. Gutenberg–Richter frequency–magnitude distribution (log10 N >= M)
+//     Plot as line chart with log y-axis.
+let binW = 0.1;
+QuakesLatest
+| where EventTime between (_startTime .. _endTime) and EventType == "earthquake" and isnotnull(Magnitude)
+| summarize N = count() by MagBin = bin(Magnitude, binW)
+| order by MagBin desc
+| extend CumulativeN = row_cumsum(N)
+| extend Log10CumN = log10(CumulativeN)
+| order by MagBin asc
+
+// R2. b-value by Aki (1965) maximum-likelihood estimator, with Shi & Bolt (1982) uncertainty
+//     b = log10(e) / (mean(M) - (Mc - dM/2)).  Global b is typically ~1.0.
+//     Mc (magnitude of completeness) set to 4.5 for global catalog consistency.
+let Mc = 4.5; let dM = 0.1;
+QuakesLatest
+| where EventTime between (_startTime .. _endTime) and EventType == "earthquake" and Magnitude >= Mc
+| summarize N = count(), MeanM = avg(Magnitude), VarM = variance(Magnitude) by Region
+| where N >= 50
+| extend b = log10(exp(1)) / (MeanM - (Mc - dM / 2))
+| extend b_StdErr = 2.30 * b * b * sqrt(VarM / N)
+| project Region, N, b = round(b, 2), b_StdErr = round(b_StdErr, 2)
+| order by N desc
+
+// R3. Depth vs magnitude (scatter) — subduction zones show deep clusters
+QuakesLatest
+| where EventTime between (_startTime .. _endTime) and EventType == "earthquake" and Magnitude >= _minMag
+| project DepthKm, Magnitude, DepthClass, Region
+
+// R4. Aftershock candidates: events within 100 km and 7 days after any M6+ mainshock
+let mainshocks =
+    QuakesLatest
+    | where EventTime between (_startTime .. _endTime) and Magnitude >= 6.0
+    | project MainId = EventId, MainTime = EventTime, MainMag = Magnitude,
+              MainLat = Latitude, MainLon = Longitude, MainPlace = Place, k = 1;
+QuakesLatest
+| where EventTime between (_startTime .. _endTime + 7d)
+| extend k = 1
+| join kind=inner mainshocks on k
+| where EventId != MainId
+      and EventTime between (MainTime .. MainTime + 7d)
+      and geo_distance_2points(Longitude, Latitude, MainLon, MainLat) <= 100000
+| summarize Aftershocks = count(), LargestAftershock = max(Magnitude),
+            Bath_DeltaM = MainMag - max(Magnitude)       // Båth's law: ~1.2
+  by MainId, MainPlace, MainMag, MainTime
+| order by MainMag desc
+
+// R5. Omori decay — aftershock rate per day after each M6+ mainshock
+let mainshocks =
+    QuakesLatest
+    | where EventTime between (_startTime .. _endTime) and Magnitude >= 6.0
+    | project MainId = EventId, MainTime = EventTime, MainLat = Latitude, MainLon = Longitude, k = 1;
+QuakesLatest
+| extend k = 1
+| join kind=inner mainshocks on k
+| where EventId != MainId and EventTime between (MainTime .. MainTime + 30d)
+      and geo_distance_2points(Longitude, Latitude, MainLon, MainLat) <= 100000
+| summarize Rate = count() by MainId, DaysAfter = bin((EventTime - MainTime) / 1d, 1)
+| order by MainId, DaysAfter asc
+
+// R6. Anomaly detection — unusual hourly activity per region (spike flags)
+QuakesHourly
+| where Hour > ago(14d) and EventType == "earthquake"
+| summarize Events = sum(Events) by Hour, Region
+| make-series Series = sum(Events) default = 0 on Hour from ago(14d) to now() step 1h by Region
+| extend (Anomalies, Score, Baseline) = series_decompose_anomalies(Series, 3.0)
+| mv-expand Hour to typeof(datetime), Series to typeof(long), Anomalies to typeof(int), Score to typeof(double)
+| where Anomalies == 1
+| project Hour, Region, Events = Series, Score
+| order by Hour desc
+
+// R7. Catalog quality — share of events with poor network geometry by region
+QuakesLatest
+| where EventTime between (_startTime .. _endTime)
+| summarize Events = count(), PoorQualityPct = round(100.0 * countif(QualityFlag != "good") / count(), 1),
+            ReviewedPct = round(100.0 * countif(Status == "reviewed") / count(), 1) by Network
+| order by Events desc
+
+// R8. Spatial density — H3 hexbins for heatmap (resolution 3 ≈ 12,000 km²)
+QuakesLatest
+| where EventTime between (_startTime .. _endTime) and Magnitude >= _minMag
+| summarize Events = count(), MaxMag = max(Magnitude) by Cell = geo_point_to_h3cell(Longitude, Latitude, 3)
+| extend Center = geo_h3cell_to_central_point(Cell)
+| project Cell, Lat = todouble(Center.coordinates[1]), Lon = todouble(Center.coordinates[0]), Events, MaxMag
+
+
+// ---------------- ACTIVATOR (alerting) ----------------
+// Source query for an Activator rule: fire when a new M6+ or tsunami-flagged event lands.
+Quakes
+| where IngestedAt > ago(5m) and (Magnitude >= 6.0 or Tsunami)
+| summarize arg_max(Updated, *) by EventId
+| project EventId, EventTime, Magnitude, Place, Tsunami, Alert, Url

@@ -1,0 +1,24 @@
+.create-or-alter function with (folder = "Ingest", docstring = "New or revised USGS events from the past-day feed, shaped like QuakesRaw. Run: .set-or-append QuakesRaw <| Fn_UsgsNewEvents()") Fn_UsgsNewEvents() {
+    externaldata(line: string) [h@"https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson"] with (format = "txt")
+    | where line startswith '{"type":"Feature",'
+    | extend f = parse_json(trim_end(@",", line))
+    | extend p = f["properties"], c = f["geometry"]["coordinates"]
+    | extend Place = tostring(p["place"])
+    | project EventId = tostring(f["id"]), Updated = unixtime_milliseconds_todatetime(tolong(p["updated"])), EventTime = unixtime_milliseconds_todatetime(tolong(p["time"])), Magnitude = toreal(p["mag"]), MagType = tostring(p["magType"]), Place, Region = iff(Place has ", ", tostring(split(Place, ", ")[-1]), Place), Latitude = toreal(c[1]), Longitude = toreal(c[0]), DepthKm = toreal(c[2]), Significance = toint(p["sig"]), Tsunami = toint(p["tsunami"]), Felt = toint(p["felt"]), Cdi = toreal(p["cdi"]), Mmi = toreal(p["mmi"]), Alert = tostring(p["alert"]), Status = tostring(p["status"]), EventType = tostring(p["type"]), Network = tostring(p["net"]), Nst = toint(p["nst"]), Gap = toreal(p["gap"]), Rms = toreal(p["rms"]), Dmin = toreal(p["dmin"]), Url = tostring(p["url"]), ProducedAt = now()
+    | join kind = leftanti (QuakesRaw | where ProducedAt > ago(35d) | distinct EventId, Updated) on EventId, Updated
+}
+
+.set-or-append QuakesRaw <|
+    externaldata(line: string) [h@"https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_month.geojson"] with (format = "txt")
+    | where line startswith '{"type":"Feature",'
+    | extend f = parse_json(trim_end(@",", line))
+    | extend p = f["properties"], c = f["geometry"]["coordinates"]
+    | extend Place = tostring(p["place"])
+    | project EventId = tostring(f["id"]), Updated = unixtime_milliseconds_todatetime(tolong(p["updated"])), EventTime = unixtime_milliseconds_todatetime(tolong(p["time"])), Magnitude = toreal(p["mag"]), MagType = tostring(p["magType"]), Place, Region = iff(Place has ", ", tostring(split(Place, ", ")[-1]), Place), Latitude = toreal(c[1]), Longitude = toreal(c[0]), DepthKm = toreal(c[2]), Significance = toint(p["sig"]), Tsunami = toint(p["tsunami"]), Felt = toint(p["felt"]), Cdi = toreal(p["cdi"]), Mmi = toreal(p["mmi"]), Alert = tostring(p["alert"]), Status = tostring(p["status"]), EventType = tostring(p["type"]), Network = tostring(p["net"]), Nst = toint(p["nst"]), Gap = toreal(p["gap"]), Rms = toreal(p["rms"]), Dmin = toreal(p["dmin"]), Url = tostring(p["url"]), ProducedAt = now()
+    | join kind = leftanti (QuakesRaw | where ProducedAt > ago(35d) | distinct EventId, Updated) on EventId, Updated
+
+QuakesRaw | summarize RawRows = count(), Latest = max(EventTime)
+| extend SilverRows = toscalar(Quakes | count), LatestViewRows = toscalar(QuakesLatest | count)
+
+// Scheduled every 5 minutes by the notebook nb_usgs_ingest:
+// .set-or-append QuakesRaw <| Fn_UsgsNewEvents()

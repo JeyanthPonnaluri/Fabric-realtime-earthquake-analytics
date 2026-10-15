@@ -1,0 +1,98 @@
+// =====================================================================
+//  Power BI semantic model — Global Earthquake RTI
+//  Connection: Get data -> KQL Database (Eventhouse) -> QuakeDB
+//              Mode: DirectQuery.  Tables: QuakesLatest, QuakesHourly
+//  Add a calculated/Power Query table 'MagBand Sort' if you want bands ordered.
+//  Report settings: Format page -> Page refresh -> On -> Change detection
+//    using measure [Last Ingested], check every 30–60 s (within the
+//    minimum your capacity admin allows).
+// =====================================================================
+
+// ---------- Core ----------
+Events =
+COUNTROWS ( QuakesLatest )
+
+Earthquakes =
+CALCULATE ( [Events], QuakesLatest[EventType] = "earthquake" )
+
+M4+ Events =
+CALCULATE ( [Earthquakes], QuakesLatest[Magnitude] >= 4 )
+
+M6+ Events =
+CALCULATE ( [Earthquakes], QuakesLatest[Magnitude] >= 6 )
+
+Max Magnitude =
+MAX ( QuakesLatest[Magnitude] )
+
+Avg Depth (km) =
+AVERAGE ( QuakesLatest[DepthKm] )
+
+Tsunami Flags =
+CALCULATE ( [Events], QuakesLatest[Tsunami] = TRUE () )
+
+Felt Reports =
+SUM ( QuakesLatest[Felt] )
+
+Reviewed % =
+DIVIDE ( CALCULATE ( [Events], QuakesLatest[Status] = "reviewed" ), [Events] )
+
+// ---------- Freshness (used for change detection + health card) ----------
+Last Ingested =
+MAX ( QuakesLatest[IngestedAt] )
+
+Minutes Since Last Event =
+DATEDIFF ( MAX ( QuakesLatest[EventTime] ), UTCNOW (), MINUTE )
+
+Freshness Status =
+VAR m = DATEDIFF ( [Last Ingested], UTCNOW (), MINUTE )
+RETURN SWITCH ( TRUE (), m <= 5, "🟢 Live", m <= 30, "🟡 Delayed", "🔴 Stale" )
+
+// ---------- Strongest event label for KPI card ----------
+Strongest Event =
+VAR t = TOPN ( 1, QuakesLatest, QuakesLatest[Magnitude], DESC )
+RETURN
+    MAXX ( t, "M" & FORMAT ( QuakesLatest[Magnitude], "0.0" ) & " — " & QuakesLatest[Place] )
+
+// ---------- Trend vs previous equal period ----------
+Events Prev Period =
+VAR mn = MIN ( QuakesLatest[EventTime] )
+VAR mx = MAX ( QuakesLatest[EventTime] )
+VAR span = mx - mn
+RETURN
+    CALCULATE (
+        [Earthquakes],
+        REMOVEFILTERS ( QuakesLatest[EventTime] ),
+        QuakesLatest[EventTime] >= mn - span,
+        QuakesLatest[EventTime] < mn
+    )
+
+Events Δ % =
+DIVIDE ( [Earthquakes] - [Events Prev Period], [Events Prev Period] )
+
+// ---------- Research: b-value (Aki ML) for current filter context ----------
+Mc = 4.5
+
+b-value (Aki) =
+VAR mc = [Mc]
+VAR meanM =
+    CALCULATE ( AVERAGE ( QuakesLatest[Magnitude] ),
+        QuakesLatest[Magnitude] >= mc, QuakesLatest[EventType] = "earthquake" )
+VAR n =
+    CALCULATE ( [Earthquakes], QuakesLatest[Magnitude] >= mc )
+RETURN
+    IF ( n >= 50, DIVIDE ( LOG10 ( EXP ( 1 ) ), meanM - ( mc - 0.05 ) ) )
+
+// ---------- Energy release (Gutenberg–Richter energy relation, joules) ----------
+// log10 E = 1.5 M + 4.8
+Energy Released (TJ) =
+SUMX ( QuakesLatest, POWER ( 10, 1.5 * QuakesLatest[Magnitude] + 4.8 ) ) / 1e12
+
+// ---------- Conditional color for map bubbles ----------
+Magnitude Color =
+VAR m = MAX ( QuakesLatest[Magnitude] )
+RETURN SWITCH ( TRUE (),
+    m >= 6, "#B42318",
+    m >= 5, "#E8590C",
+    m >= 4, "#F59F00",
+    m >= 2.5, "#2F9E44",
+    "#868E96" )

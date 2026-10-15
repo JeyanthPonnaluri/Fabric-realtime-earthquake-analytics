@@ -1,0 +1,29 @@
+.execute database script with (ContinueOnErrors=false) <|
+//
+.create-merge table QuakesRaw (EventId: string, Updated: datetime, EventTime: datetime, Magnitude: real, MagType: string, Place: string, Region: string, Latitude: real, Longitude: real, DepthKm: real, Significance: int, Tsunami: int, Felt: int, Cdi: real, Mmi: real, Alert: string, Status: string, EventType: string, Network: string, Nst: int, Gap: real, Rms: real, Dmin: real, Url: string, ProducedAt: datetime)
+//
+.create-merge table Quakes (EventId: string, Updated: datetime, EventTime: datetime, Magnitude: real, MagType: string, MagBand: string, Place: string, Region: string, Latitude: real, Longitude: real, DepthKm: real, DepthClass: string, Hemisphere: string, Significance: int, Tsunami: bool, Felt: int, Cdi: real, Mmi: real, Alert: string, Status: string, EventType: string, Network: string, Nst: int, Gap: real, Rms: real, Dmin: real, QualityFlag: string, PublishLagSec: real, IngestedAt: datetime, Url: string)
+//
+.create-or-alter function with (folder = "ETL", docstring = "Type, enrich and quality-flag raw quakes") Fn_QuakesRawToSilver() {
+    QuakesRaw
+    | where isnotempty(EventId) and isnotnull(EventTime)
+    | extend MagBand = case(isnull(Magnitude), "Unknown", Magnitude < 2.5, "Micro (<2.5)", Magnitude < 4.0, "Minor (2.5-4)", Magnitude < 5.0, "Light (4-5)", Magnitude < 6.0, "Moderate (5-6)", Magnitude < 7.0, "Strong (6-7)", "Major (7+)")
+    | extend DepthClass = case(isnull(DepthKm), "Unknown", DepthKm < 70, "Shallow (<70 km)", DepthKm < 300, "Intermediate (70-300 km)", "Deep (300+ km)")
+    | extend Hemisphere = iff(Latitude >= 0, "North", "South")
+    | extend QualityFlag = case(Gap > 180, "poor_azimuthal_gap", Nst > 0 and Nst < 5, "few_stations", "good")
+    | project EventId, Updated, EventTime, Magnitude, MagType, MagBand, Place, Region, Latitude, Longitude, DepthKm, DepthClass, Hemisphere, Significance, Tsunami = (Tsunami == 1), Felt, Cdi, Mmi, Alert, Status, EventType, Network, Nst, Gap, Rms, Dmin, QualityFlag, PublishLagSec = datetime_diff('second', ProducedAt, EventTime) * 1.0, IngestedAt = ingestion_time(), Url
+}
+//
+.alter table Quakes policy update @'[{"IsEnabled": true, "Source": "QuakesRaw", "Query": "Fn_QuakesRawToSilver()", "IsTransactional": true, "PropagateIngestionProperties": false}]'
+//
+.create-or-alter materialized-view QuakesLatest on table Quakes { Quakes | summarize arg_max(Updated, *) by EventId }
+//
+.create-or-alter materialized-view QuakesHourly on table Quakes { Quakes | summarize Events = dcount(EventId), MaxMag = max(Magnitude), SumSig = sum(Significance) by Hour = bin(EventTime, 1h), Region, MagBand, EventType }
+//
+.alter-merge table QuakesRaw policy retention softdelete = 30d recoverability = disabled
+//
+.alter table QuakesRaw policy caching hot = 3d
+//
+.alter-merge table Quakes policy retention softdelete = 3650d
+//
+.alter table Quakes policy caching hot = 90d
