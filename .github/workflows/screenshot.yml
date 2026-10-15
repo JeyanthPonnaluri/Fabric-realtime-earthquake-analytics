@@ -1,0 +1,36 @@
+name: Refresh live demo screenshot
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['docs/**', '.github/**']
+  schedule:
+    - cron: '17 3 * * *'   # daily, 08:47 IST
+
+permissions:
+  contents: write
+
+jobs:
+  screenshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install Playwright
+        run: |
+          npm install --no-save playwright@1.47.2
+          npx playwright install --with-deps chromium
+      - name: Serve the demo and capture it
+        run: |
+          python3 -m http.server 8000 --directory docs > /dev/null 2>&1 &
+          sleep 2
+          node .github/scripts/screenshot.mjs
+      - name: Commit the screenshot
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add screenshots/live-demo.png
+          git diff --cached --quiet || (git commit -m "Refresh live demo screenshot" && git push)

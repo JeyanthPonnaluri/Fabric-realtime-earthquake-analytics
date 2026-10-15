@@ -37,8 +37,7 @@ This project builds the full path from raw signal to live insight:
 
 ## The Real-Time Dashboard
 
-<!-- Add your screenshot: screenshots/fabric-dashboard.png -->
-![Fabric Real-Time Dashboard](screenshots/fabric-dashboard.png)
+<!-- Add a screenshot of the Fabric dashboard: save it as screenshots/fabric-dashboard.png and add ![Fabric Real-Time Dashboard](screenshots/fabric-dashboard.png) here -->
 
 | Tile | What it shows | Why it matters |
 |---|---|---|
@@ -57,8 +56,9 @@ Energy uses the Gutenberg–Richter energy relation, log₁₀E = 1.5M + 4.8 (jo
 
 **[jeyanthponnaluri.github.io/Fabric-realtime-earthquake-analytics](https://jeyanthponnaluri.github.io/Fabric-realtime-earthquake-analytics/)**
 
-<!-- Add your screenshot: screenshots/live-demo.png -->
-![Global Quake Watch console](screenshots/live-demo.png)
+[![Global Quake Watch console](screenshots/live-demo.png)](https://jeyanthponnaluri.github.io/Fabric-realtime-earthquake-analytics/)
+
+<sub>Screenshot refreshed daily by a GitHub Actions workflow (`.github/workflows/screenshot.yml`) that opens the live demo in headless Chromium.</sub>
 
 The Fabric dashboard needs a Fabric sign-in, so this repo also ships a public console that anyone can open. It fetches the USGS M2.5+ past-7-days feed directly in the visitor's browser and offers:
 
@@ -119,6 +119,7 @@ The `multijson` format returned the whole feed as one object, so the function re
 │   └── dashboard/dashboard_as_code.py       Real-Time Dashboard definition via Fabric REST API
 ├── powerbi/measures.dax          DAX measures for a Power BI report (DirectQuery / Direct Lake)
 ├── producer/usgs_to_eventstream.py   Alternative route: Python producer → Eventstream (Event Hub protocol)
+├── .github/workflows/screenshot.yml  Daily CI job that screenshots the live demo for this README
 └── screenshots/                  Fabric dashboard, pipeline and demo screenshots
 ```
 
